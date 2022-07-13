@@ -6,9 +6,15 @@ import { expect } from "expect";
 import * as circus from "jest-circus";
 import { inspect } from "util";
 import { isWorkerThread } from "piscina";
+import { readdirSync, readFileSync } from "fs";
+import preloadList from "node-preload";
+import libCoverage from "istanbul-lib-coverage";
+import childCov from "./child-cov.cjs";
 
 /** @typedef {{ failures: number, passes: number, pending: number, start: number, end: number }} Stats */
 /** @typedef {{ ancestors: string[], title: string, duration: number, errors: Error[], skipped: boolean }} InternalTestResult */
+
+let coverageTempDir;
 
 const initialSetup = once(async projectConfig => {
   // Node.js workers (worker_threads) don't support
@@ -45,14 +51,30 @@ const initialSetup = once(async projectConfig => {
     const { default: setup } = await import(pathToFileURL(setupFile));
     if (typeof setup === "function") await setup();
   }
+
+  if (coverageTempDir) {
+    preloadList.push(
+      fileURLToPath(path.join(path.dirname(import.meta.url), "child-cov.cjs"))
+    );
+    childCov.setHook(() => {
+      return {
+        LIGHT_JEST_COV_TMP: coverageTempDir,
+      };
+    });
+  }
 });
 
 export default async function run({
   test,
+  coverageTempDir: _coverageTempDir,
   updateSnapshot,
   testNamePattern,
   port,
 }) {
+  if (_coverageTempDir) {
+    coverageTempDir = _coverageTempDir;
+  }
+
   await initialSetup(test.context.config);
 
   port.postMessage("start");
@@ -237,12 +259,38 @@ function callAsync(fn) {
  * @param {import("@jest/test-result").Test} testInput
  * @returns {import("@jest/test-result").TestResult}
  */
-function toTestResult(stats, tests, { path, context }) {
+function toTestResult(stats, tests, { path: testFilePath, context }) {
   const { start, end } = stats;
   const runtime = end - start;
 
+  let coverage = globalThis.__coverage__;
+  //globalThis.__coverage__ = undefined;
+
+  // https://github.com/facebook/jest/issues/2418#issuecomment-423806659
+  const normalizeCoverage = obj => {
+    const result = obj;
+    Object.entries(result).forEach(([k, v]) => {
+      if (v.data) result[k] = v.data;
+    });
+    return result;
+  };
+
+  if (coverageTempDir) {
+    const coverageMap = libCoverage.createCoverageMap(coverage);
+    readdirSync(coverageTempDir).forEach(file => {
+      const filePath = path.join(coverageTempDir, file);
+      if (file.startsWith(`cov_`)) {
+        const data = JSON.parse(readFileSync(filePath, "utf8"));
+        if (data) {
+          coverageMap.merge(data);
+        }
+      }
+    });
+    coverage = normalizeCoverage(coverageMap.toJSON());
+  }
+
   return {
-    coverage: globalThis.__coverage__,
+    coverage: coverage,
     console: null,
     failureMessage: tests
       .filter(t => t.errors.length > 0)
@@ -268,7 +316,7 @@ function toTestResult(stats, tests, { path, context }) {
     },
     sourceMaps: {},
     testExecError: null,
-    testFilePath: path,
+    testFilePath: testFilePath,
     testResults: tests.map(test => {
       return {
         ancestorTitles: test.ancestors,

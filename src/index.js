@@ -1,6 +1,8 @@
 import { Piscina } from "piscina";
 import supportsColor from "supports-color";
 import { MessageChannel } from "worker_threads";
+import path from "path";
+import { rmSync, mkdirSync } from "fs";
 
 /** @typedef {import("@jest/test-result").Test} Test */
 
@@ -8,6 +10,7 @@ export default class LightRunner {
   // TODO: Use real private fields when we drop support for Node.js v12
   _config;
   _piscina;
+  _coverageID = 0;
 
   constructor(config) {
     this._config = config;
@@ -44,7 +47,19 @@ export default class LightRunner {
    * @param {*} onFailure
    */
   runTests(tests, watcher, onStart, onResult, onFailure) {
-    const { updateSnapshot, testNamePattern } = this._config;
+    const { updateSnapshot, testNamePattern, collectCoverage } = this._config;
+
+    let coverageTempDir;
+    if (collectCoverage) {
+      coverageTempDir = path.join(
+        this._config.coverageDirectory,
+        "light_jest_tmp"
+      );
+      try {
+        rmSync(coverageTempDir, { recursive: true, force: true });
+      } catch (error) {}
+      mkdirSync(coverageTempDir, { recursive: true });
+    }
 
     return Promise.all(
       tests.map(test => {
@@ -52,9 +67,21 @@ export default class LightRunner {
         mc.port2.onmessage = () => onStart(test);
         mc.port2.unref();
 
+        const testCovDir = path.join(
+          coverageTempDir,
+          (this._coverageID++).toString()
+        );
+        mkdirSync(testCovDir); // Because MAX_PATH of Windows is 260, i'm not using test.id here.
+
         return this._piscina
           .run(
-            { test, updateSnapshot, testNamePattern, port: mc.port1 },
+            {
+              test,
+              coverageTempDir: testCovDir,
+              updateSnapshot,
+              testNamePattern,
+              port: mc.port1,
+            },
             { transferList: [mc.port1] }
           )
           .then(

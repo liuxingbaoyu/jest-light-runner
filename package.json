@@ -14,11 +14,14 @@
   },
   "dependencies": {
     "@jest/expect": "^28.0.2",
+    "istanbul-lib-coverage": "^3.2.0",
     "jest-circus": "^28.0.0",
     "jest-each": "^28.0.0",
     "jest-mock": "^28.0.0",
     "jest-snapshot": "^28.0.0",
+    "node-preload": "^0.2.1",
     "piscina": "^3.1.0",
+    "process-on-spawn": "^1.0.0",
     "supports-color": "^9.2.1"
   },
   "devDependencies": {
