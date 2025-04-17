@@ -102,6 +102,7 @@ jobs:
         env:
           NODE_ENV: production
           FULL_TEST: true
+          ENABLE_CODE_COVERAGE: true
         run: |
           yarn c8 jest tests/format ${{ matrix.additional-options }}
         working-directory: prettier
